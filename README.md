@@ -1,2 +1,3 @@
 # LLM_RAG
 This Repository contains code demonstrating use of RAG with VectorDBs, LLMs, Tools. There are 2 main functionalities implemented here. A chatbot which tax answers question based on publication 17. Another is a chatbot which suggests buy/sell for a given stock based on Technical Analysis. 
+The code in this repository need to run in a venv or conda environment for which requirements.txt is provided. Create a venv or conda environment with python==3.12. Latest versions of python are creating numpy issues and breaking the envoironment. For best results create and environment and get the torch install commands from pytorch website. 
