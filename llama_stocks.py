@@ -81,7 +81,7 @@ def get_stock_performance(ticker:str):
         print(df.info())
         df.dropna(inplace=True)
 
-        mpf.plot(df, type='candle', mav=(8,50,200) , style='charles', volume=True)
+        #mpf.plot(df, type='candle', mav=(8,50,200) , style='charles', volume=True)
 
         df['Daily_Diff'] = df['Close'].diff(periods=1)
         df['Weekly_Diff'] = df['Close'].diff(periods=7)
@@ -160,10 +160,6 @@ def get_stock_performance(ticker:str):
             if last_rsi < 30:
                 decision = 'Possible Buy'
 
-        
-
-        
-
         start_val = df['Close'].iloc[0] 
         end_val = df['Close'].iloc[-1] 
         print( start_val, end_val)
@@ -176,16 +172,83 @@ def get_stock_performance(ticker:str):
     return ticker, 'Hold', 0, 0, 0, 0, 0, 0
 
 
+def execute_pipeline(tokenizer, pipeline, messages):
+    tokenizer.apply_chat_template(messages, tools=[get_stock_performance] , tokenize=False, add_generation_prompt=True)
+    sequences = pipeline(messages)
+    print('************** LLAMA **********************')
+    for seq in sequences:
+        print(f"Result: {seq['generated_text']}")
+    return sequences
+
+function_definitions = get_json_schema(get_stock_performance)
+
+model_name = 'meta-llama/Llama-3.2-1B-Instruct'
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"device - {device}")
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+pipeline = transformers.pipeline(task="text-generation", model=model_name,
+                                 torch_dtype=torch.float16, device_map="auto",)
+
+system_prompt = """You are given a question and a set of possible functions. 
+Based on the question, you will need to make one or more function/tool calls to achieve the purpose. 
+If none of the function can be used, point it out. If the given question lacks the parameters required by the function,
+also point it out. The params to the function needs to be a stock tracker
+Call the matching function and return the result. You SHOULD NOT include any other text in the response.
+Here is a list of functions in JSON format that you can invoke.\n\n{functions}\n""".format(functions=function_definitions)
+
+
+user_query = "get me stock performance of company which is largest GPU manufacturer"
+
+def handle_user_query(system_prompt, user_query)->str:
+    chat = [
+        {"role": "system","content": system_prompt} , 
+        {"role": "user", "content": user_query}
+    ]
+
+    sequences = execute_pipeline(tokenizer, pipeline, chat)
+    print(sequences[0]['generated_text'][-1]['content'])
+    print(type(sequences[0]['generated_text'][-1]['content']))
+    user_response_dict = ast.literal_eval(sequences[0]['generated_text'][-1]['content'])
+    if (user_response_dict['type'] == 'function'):
+    # Get function map 
+    # There are 2 cases here, In one case we get function dictionary, in 
+    # other case no dict  
+        if 'function' in user_response_dict:
+            if (type(user_response_dict['function']) == str):
+                func_dict = user_response_dict['parameters']['ticker']
+                func_name = user_response_dict['function']
+            elif (type(user_response_dict['function']) == dict):
+                func_dict = user_response_dict['function']['parameters']['ticker']
+                func_name = user_response_dict['function']['name']
+        else:
+            func_dict = user_response_dict['parameters']['ticker']
+            func_name = user_response_dict['name']
+
+    #Get method object 
+        func_obj = globals()[func_name]
+        ticker, decision, last_histogram, last_macd, last_signal, last_rsi, last_adx, perc_change = func_obj(func_dict)
+        print( ticker, decision, last_histogram, last_macd, last_signal, last_rsi, last_adx, perc_change)
+        return f"Ticker: {ticker}, Decision: {decision}, MACD-Signal: {last_histogram}, RSI: {last_rsi}, ADX: {last_adx}, Percentage Change: {perc_change}"
+
+    return f"No information found {user_query}"
+
+#handle_user_query(system_prompt, user_query)
+
+
 @cl.on_message
 async def main(message: cl.Message):
     # Your custom logic goes here...
     # This is the input from the USER -> 
-    ticker, decision, histogram, macd, signal, rsi, adx, perc_change = get_stock_performance(message.content)
+    result = handle_user_query(system_prompt,message.content)
 
     # Send a response back to the user
     await cl.Message(
-        content=f"Ticker: {ticker}, Decision: {decision}, MACD Rise/Fall: {histogram:.2f}, RSI: {rsi}, ADX: {adx}, % Change: {perc_change:.2f}",
+        content=result,
     ).send()
 
 
-logger.info(get_stock_performance('USDKZT=X'))
+#logger.info(get_stock_performance('USDKZT=X'))
+
